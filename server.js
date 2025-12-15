@@ -4,12 +4,15 @@ const cors = require("cors");
 const multer = require("multer");
 const { Server } = require("socket.io");
 const admin = require("firebase-admin");
+const path = require("path");
 
 /* ===========================
-   🔑 FIREBASE INIT
+   🔑 FIREBASE INIT (RENDER SAFE)
 =========================== */
+const firebaseKeyPath = path.join(process.cwd(), "firebaseKey.json");
+
 admin.initializeApp({
-  credential: admin.credential.cert(require("./firebaseKey.json")),
+  credential: admin.credential.cert(require(firebaseKeyPath)),
   storageBucket: "photo-video-20596.appspot.com"
 });
 
@@ -30,7 +33,7 @@ const io = new Server(server, {
 });
 
 /* ===========================
-   📦 MULTER (MEMORY)
+   📦 MULTER (MEMORY STORAGE)
 =========================== */
 const upload = multer({
   storage: multer.memoryStorage()
@@ -57,10 +60,7 @@ io.on("connection", (socket) => {
       createdAt: Date.now()
     };
 
-    // Save message to database
     await db.collection("messages").add(msg);
-
-    // Broadcast to all users
     io.emit("receive_message", msg);
   });
 
@@ -70,7 +70,7 @@ io.on("connection", (socket) => {
 });
 
 /* ===========================
-   📸 IMAGE UPLOAD (5MB)
+   📸 IMAGE UPLOAD (MAX 5MB)
 =========================== */
 app.post("/upload/image", upload.single("image"), async (req, res) => {
   try {
@@ -78,7 +78,7 @@ app.post("/upload/image", upload.single("image"), async (req, res) => {
       return res.status(400).json({ error: "No image selected" });
 
     if (req.file.size > 5 * 1024 * 1024)
-      return res.status(400).json({ error: "Max 5MB allowed" });
+      return res.status(400).json({ error: "Image max 5MB" });
 
     const fileName = `images/${Date.now()}_${req.file.originalname}`;
     const file = bucket.file(fileName);
@@ -90,14 +90,14 @@ app.post("/upload/image", upload.single("image"), async (req, res) => {
     const url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
 
     res.json({ success: true, url });
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Image upload failed" });
   }
 });
 
 /* ===========================
-   🎥 VIDEO UPLOAD (30MB)
+   🎥 VIDEO UPLOAD (MAX 30MB)
 =========================== */
 app.post("/upload/video", upload.single("video"), async (req, res) => {
   try {
@@ -105,7 +105,7 @@ app.post("/upload/video", upload.single("video"), async (req, res) => {
       return res.status(400).json({ error: "No video selected" });
 
     if (req.file.size > 30 * 1024 * 1024)
-      return res.status(400).json({ error: "Max 30MB allowed" });
+      return res.status(400).json({ error: "Video max 30MB" });
 
     const fileName = `videos/${Date.now()}_${req.file.originalname}`;
     const file = bucket.file(fileName);
@@ -117,8 +117,8 @@ app.post("/upload/video", upload.single("video"), async (req, res) => {
     const url = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
 
     res.json({ success: true, url });
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Video upload failed" });
   }
 });
@@ -138,10 +138,16 @@ app.get("/messages", async (req, res) => {
 });
 
 /* ===========================
+   ❤️ HEALTH CHECK (RENDER)
+=========================== */
+app.get("/", (req, res) => {
+  res.send("Chat backend is running 🚀");
+});
+
+/* ===========================
    🌍 START SERVER (RENDER)
 =========================== */
 const PORT = process.env.PORT || 10000;
-
 server.listen(PORT, () => {
-  console.log("Chat backend running on port", PORT);
+  console.log("Backend running on port", PORT);
 });
