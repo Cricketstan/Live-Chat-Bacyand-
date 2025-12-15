@@ -7,7 +7,9 @@ const multer = require("multer");
 const { Server } = require("socket.io");
 const admin = require("firebase-admin");
 
-/* Firebase */
+/* =========================
+   FIREBASE
+========================= */
 admin.initializeApp({
   credential: admin.credential.cert(require("/etc/secrets/firebaseKey.json")),
   storageBucket: "photo-video-20596.appspot.com"
@@ -16,65 +18,123 @@ admin.initializeApp({
 const db = admin.firestore();
 const bucket = admin.storage().bucket();
 
-/* App */
+/* =========================
+   APP + CORS (FIXED)
+========================= */
 const app = express();
-app.use(cors());
+
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
+app.options("*", cors());
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
 
-/* Upload */
-const upload = multer({ storage: multer.memoryStorage() });
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
-/* Chat */
+/* =========================
+   UPLOAD SETUP
+========================= */
+const upload = multer({
+  storage: multer.memoryStorage()
+});
+
+/* =========================
+   SOCKET CHAT
+========================= */
 io.on("connection", (socket) => {
   socket.on("send_message", async (data) => {
     const msg = { ...data, createdAt: Date.now() };
-    await db.collection("messages").add(msg);
+
+    try {
+      await db.collection("messages").add(msg);
+    } catch (e) {
+      console.error("DB error:", e);
+    }
+
     io.emit("receive_message", msg);
   });
 });
 
-/* Image (5MB) */
+/* =========================
+   IMAGE UPLOAD (5MB)
+========================= */
 app.post("/upload/image", upload.single("image"), async (req, res) => {
-  if (!req.file || req.file.size > 5 * 1024 * 1024)
-    return res.status(400).json({ error: "Invalid image" });
+  try {
+    if (!req.file) return res.status(400).json({ error: "No image" });
+    if (req.file.size > 5 * 1024 * 1024)
+      return res.status(400).json({ error: "Image too large" });
 
-  const name = `images/${Date.now()}_${req.file.originalname}`;
-  await bucket.file(name).save(req.file.buffer, {
-    metadata: { contentType: req.file.mimetype }
-  });
+    const name = `images/${Date.now()}_${req.file.originalname}`;
+    await bucket.file(name).save(req.file.buffer, {
+      metadata: { contentType: req.file.mimetype }
+    });
 
-  res.json({
-    url: `https://storage.googleapis.com/${bucket.name}/${name}`
-  });
+    const url = `https://storage.googleapis.com/${bucket.name}/${name}`;
+    res.json({ success: true, url });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Image upload failed" });
+  }
 });
 
-/* Video (30MB) */
+/* =========================
+   VIDEO UPLOAD (30MB)
+========================= */
 app.post("/upload/video", upload.single("video"), async (req, res) => {
-  if (!req.file || req.file.size > 30 * 1024 * 1024)
-    return res.status(400).json({ error: "Invalid video" });
+  try {
+    if (!req.file) return res.status(400).json({ error: "No video" });
+    if (req.file.size > 30 * 1024 * 1024)
+      return res.status(400).json({ error: "Video too large" });
 
-  const name = `videos/${Date.now()}_${req.file.originalname}`;
-  await bucket.file(name).save(req.file.buffer, {
-    metadata: { contentType: req.file.mimetype }
-  });
+    const name = `videos/${Date.now()}_${req.file.originalname}`;
+    await bucket.file(name).save(req.file.buffer, {
+      metadata: { contentType: req.file.mimetype }
+    });
 
-  res.json({
-    url: `https://storage.googleapis.com/${bucket.name}/${name}`
-  });
+    const url = `https://storage.googleapis.com/${bucket.name}/${name}`;
+    res.json({ success: true, url });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Video upload failed" });
+  }
 });
 
-/* Messages */
+/* =========================
+   GET MESSAGES
+========================= */
 app.get("/messages", async (req, res) => {
-  const snap = await db.collection("messages").orderBy("createdAt").limit(100).get();
+  const snap = await db
+    .collection("messages")
+    .orderBy("createdAt", "asc")
+    .limit(100)
+    .get();
+
   res.json(snap.docs.map(d => d.data()));
 });
 
-/* Health */
-app.get("/", (req, res) => res.send("OK"));
+/* =========================
+   HEALTH CHECK
+========================= */
+app.get("/", (req, res) => {
+  res.send("OK");
+});
 
-/* Start */
+/* =========================
+   START SERVER (RENDER)
+========================= */
 const PORT = process.env.PORT || 10000;
-server.listen(PORT);
+server.listen(PORT, () => {
+  console.log("Server running on port", PORT);
+});
